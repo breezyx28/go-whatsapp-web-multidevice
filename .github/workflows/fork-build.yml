@@ -1,0 +1,41 @@
+name: Fork build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [cs-main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.26.0"
+
+      - name: Install toolchains
+        run: sudo apt-get update && sudo apt-get install -y gcc-mingw-w64 ffmpeg
+
+      - name: Test
+        working-directory: src
+        run: go test ./usecase/ ./validations/ ./ui/rest/
+
+      - name: Build linux-amd64 and windows-amd64
+        working-directory: src
+        run: |
+          mkdir -p ../dist
+          CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -ldflags "-s -w" -o ../dist/whatsapp-linux-amd64 .
+          CGO_ENABLED=1 GOOS=windows GOARCH=amd64 CC=x86_64-w64-mingw32-gcc go build -ldflags "-s -w" -o ../dist/whatsapp-windows-amd64.exe .
+          cd ../dist && sha256sum * > SHA256SUMS
+
+      - name: Publish rolling release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="cs-${GITHUB_SHA::7}"
+          gh release create "$TAG" dist/* --target "$GITHUB_SHA" --prerelease \
+            --title "Fork build $TAG" --notes "Upstream main plus block list and GIF stickers."
